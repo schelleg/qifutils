@@ -1,17 +1,21 @@
 import pandas as pd
 import re
 from datetime import datetime
-import copy
+
 
 class QIFParser:
     def __init__(self, file_path):
         self.file_path = file_path
-        self.current_switch = None # Track the current QIF switch
+        self.current_switch = None # Track the current QIF switch   
+        self.current_account = "Unnamed Account"
+        self.current_type = "Unset Type"                    
         self.switches = []          # Store all detected switches        
         self.df = self._parse_to_dataframe()
 
         self.clean_illegal_characters()
+        self.clean_column_types()        
         self.translate_fields()
+
 
     def _parse_to_dataframe(self):
         # Read the file content
@@ -36,17 +40,19 @@ class QIFParser:
 
                 if line.startswith("!"):  # Handle QIF switches
                     self.current_switch = line
-                    self.switches.append(line)
+                    self._parse_qif_directive(line)
                     continue
-
 
                 key = line[0]  # Leading character as column
                 value = line[1:].strip()  # Rest of the line as value
                 row[key] = value
-                # DEBUG print(f'line/key/value |{line}|{key}|{value}|')
 
             row["Switch"] = self.current_switch
-            # row["AllSwitch"] = copy.deepcopy(self.switches)            
+            row["Account"] = self.current_account  
+            row["Type"] = self.current_type
+
+
+
             rows.append(row)
         
         # Convert the list of dictionaries to a DataFrame
@@ -57,7 +63,30 @@ class QIFParser:
             df['D'] = df['D'].apply(QIFParser.to_date)
 
         return df
+
+    def _parse_qif_directive(self, line):
+        """
+        Processes a QIF directive and updates the global state.
         
+        :param line: A string representing a QIF directive (e.g., '!Account:Checking').
+        """
+        if line.startswith("!Account:"):
+            # Update the current account
+            self.current_account = line[len("!Account:"):].strip()
+            print(f"Switched to account: {self.current_account}")
+        elif  line.startswith("!Type:"):
+            # Update the current account
+            self.current_type = line[len("!Type:"):].strip()
+            print(f"Switched to type: {self.current_type}")
+
+        elif line == "!Option:AutoSwitch":
+            # Enable auto-switching for accounts
+            self.current_autoswitch = True
+            print("Enabled auto-switching for accounts")
+        else:
+            print(f"Unrecognized directive: {line}")
+            # raise ValueError(f"Unrecognized directive: {line}")        
+
     def translate_fields(self):
         """
         Translate QIF fields to human-readable names based on the current switch.
@@ -120,6 +149,10 @@ class QIFParser:
         print(f"DataFrame has been exported to {file_path}")
 
 
+    def clean_column_types(self):
+        for float_column in ["U", "T"]:
+            self.df[float_column] = pd.to_numeric(self.df[float_column], errors="coerce")
+
     @staticmethod
     def to_date(date_string):
         """
@@ -172,5 +205,4 @@ if __name__ == "__main__":
     print(parser.df)
 
     # Export the DataFrame to an Excel file
-    output_file = "output_file.xlsx"
-    parser.export_to_excel(output_file)
+    parser.export_to_excel("output_file.xlsx")
